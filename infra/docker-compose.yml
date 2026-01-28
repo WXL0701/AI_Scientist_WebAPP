@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: AI_Scientist_WebAPP/backend/Dockerfile
+    environment:
+      WEBAPP_DATA_DIR: /home/guv/AI_Scientist/AI_Scientist_WebAPP/.data/webapp
+      WEBAPP_RUNS_ROOT: /home/guv/AI_Scientist/AI_Scientist_WebAPP/.data/runs
+      AI_SCIENTIST_ROOT: /home/guv/AI_Scientist
+      RUNNER_IMAGE: ai_scientist_runner:local
+      WEBAPP_JWT_SECRET: change-me
+      WEBAPP_JWT_ISSUER: ai-scientist-webapp
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../.data:/home/guv/AI_Scientist/AI_Scientist_WebAPP/.data
+      - ../..:/home/guv/AI_Scientist
+      - /root/miniconda3:/root/miniconda3:ro
+
+  frontend:
+    build:
+      context: ../frontend_vue
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "5174:80"

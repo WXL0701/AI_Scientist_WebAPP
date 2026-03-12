@@ -31,11 +31,12 @@ def verify_password(password: str, salt: str, password_hash: str) -> bool:
     return hmac.compare_digest(got, password_hash)
 
 
-def create_access_token(user_id: int, email: str) -> str:
+def create_access_token(user_id: int, username: str, role: str) -> str:
     now = int(time.time())
     payload: Dict[str, Any] = {
         "sub": str(user_id),
-        "email": email,
+        "username": username,
+        "role": role,
         "iat": now,
         "exp": now + settings.jwt_exp_seconds,
         "iss": settings.jwt_issuer,
@@ -48,4 +49,3 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"], issuer=settings.jwt_issuer)
     except Exception:
         return None
-

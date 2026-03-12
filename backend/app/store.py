@@ -38,6 +38,7 @@ def init_db() -> None:
               username TEXT NOT NULL UNIQUE,
               password_hash TEXT NOT NULL,
               salt TEXT NOT NULL,
+              role TEXT NOT NULL DEFAULT 'user',
               created_at TEXT NOT NULL
             );
 
@@ -68,6 +69,7 @@ def init_db() -> None:
               updated_at TEXT NOT NULL,
               yaml_filename TEXT NOT NULL,
               project_id TEXT NOT NULL,
+              project_name TEXT,
               prompt_version_id INTEGER,
               workspace_dir TEXT NOT NULL,
               container_id TEXT,
@@ -77,6 +79,15 @@ def init_db() -> None:
             );
             """
         )
+        try:
+            conn.execute("ALTER TABLE runs ADD COLUMN project_name TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("UPDATE users SET role='user' WHERE role IS NULL")
         conn.commit()
     finally:
         conn.close()
@@ -86,19 +97,20 @@ def init_db() -> None:
 class User:
     id: int
     username: str
+    role: str
     created_at: str
 
 
-def create_user(username: str, password_hash: str, salt: str) -> User:
+def create_user(username: str, password_hash: str, salt: str, role: str = "user") -> User:
     conn = get_conn()
     try:
         created_at = _utc_iso()
         cur = conn.execute(
-            "INSERT INTO users(username, password_hash, salt, created_at) VALUES(?,?,?,?)",
-            (username, password_hash, salt, created_at),
+            "INSERT INTO users(username, password_hash, salt, role, created_at) VALUES(?,?,?,?,?)",
+            (username, password_hash, salt, role, created_at),
         )
         conn.commit()
-        return User(id=cur.lastrowid, username=username, created_at=created_at)
+        return User(id=cur.lastrowid, username=username, role=role, created_at=created_at)
     finally:
         conn.close()
 
@@ -110,7 +122,8 @@ def get_user_by_id(user_id: int) -> Optional[User]:
         row = cur.fetchone()
         if row is None:
             return None
-        return User(id=row["id"], username=row["username"], created_at=row["created_at"])
+        role = row["role"] if row["role"] else "user"
+        return User(id=row["id"], username=row["username"], role=role, created_at=row["created_at"])
     finally:
         conn.close()
 
@@ -123,7 +136,8 @@ def get_user_by_username(username: str) -> Optional[Tuple[User, str, str]]:
         row = cur.fetchone()
         if row is None:
             return None
-        u = User(id=row["id"], username=row["username"], created_at=row["created_at"])
+        role = row["role"] if row["role"] else "user"
+        u = User(id=row["id"], username=row["username"], role=role, created_at=row["created_at"])
         return u, row["password_hash"], row["salt"]
     finally:
         conn.close()
@@ -142,16 +156,51 @@ def create_prompt_set(user_id: int, name: str) -> int:
         conn.close()
 
 
-def list_prompt_sets() -> List[Dict[str, Any]]:
+def get_prompt_set(prompt_set_id: int) -> Optional[Dict[str, Any]]:
     conn = get_conn()
     try:
-        cur = conn.execute("SELECT * FROM prompt_sets ORDER BY id DESC")
+        cur = conn.execute("SELECT * FROM prompt_sets WHERE id=?", (prompt_set_id,))
+        row = cur.fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def list_prompt_sets(user_id: int) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT prompt_sets.*, users.username AS creator
+            FROM prompt_sets
+            JOIN users ON prompt_sets.user_id = users.id
+            WHERE prompt_sets.user_id=?
+            ORDER BY prompt_sets.id DESC
+            """,
+            (user_id,),
+        )
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
 
-def create_prompt_version(prompt_set_id: int, notes: str, payload: Dict[str, Any]) -> int:
+def list_prompt_sets_all() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT prompt_sets.*, users.username AS creator
+            FROM prompt_sets
+            JOIN users ON prompt_sets.user_id = users.id
+            ORDER BY prompt_sets.id DESC
+            """
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def create_prompt_version(prompt_set_id: int, notes: str, payload: Dict[str, Any]) -> Tuple[int, int]:
     conn = get_conn()
     try:
         # get next version
@@ -169,7 +218,7 @@ def create_prompt_version(prompt_set_id: int, notes: str, payload: Dict[str, Any
             (prompt_set_id, next_ver, notes, payload_json, _utc_iso()),
         )
         conn.commit()
-        return cur.lastrowid
+        return cur.lastrowid, next_ver
     finally:
         conn.close()
 
@@ -229,18 +278,20 @@ def create_run(
     user_id: int,
     yaml_filename: str,
     project_id: str,
+    project_name: Optional[str],
     prompt_version_id: Optional[int],
     workspace_dir: str,
+    run_id: Optional[str] = None,
 ) -> str:
-    run_id = str(uuid.uuid4())
+    run_id = str(run_id or uuid.uuid4())
     conn = get_conn()
     try:
         now = _utc_iso()
         conn.execute(
             """INSERT INTO runs(
                  id, user_id, status, created_at, updated_at, 
-                 yaml_filename, project_id, prompt_version_id, workspace_dir
-               ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                 yaml_filename, project_id, project_name, prompt_version_id, workspace_dir
+               ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
                 run_id,
                 user_id,
@@ -249,6 +300,7 @@ def create_run(
                 now,
                 yaml_filename,
                 project_id,
+                project_name,
                 prompt_version_id,
                 workspace_dir,
             ),
@@ -282,10 +334,44 @@ def update_run_status(
         conn.close()
 
 
+def delete_run(run_id: str) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_runs(user_id: int) -> List[Dict[str, Any]]:
     conn = get_conn()
     try:
-        cur = conn.execute("SELECT * FROM runs WHERE user_id=? ORDER BY created_at DESC", (user_id,))
+        cur = conn.execute(
+            """
+            SELECT runs.*, users.username AS creator
+            FROM runs
+            JOIN users ON runs.user_id = users.id
+            WHERE runs.user_id=?
+            ORDER BY runs.created_at DESC
+            """,
+            (user_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_runs_all() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT runs.*, users.username AS creator
+            FROM runs
+            JOIN users ON runs.user_id = users.id
+            ORDER BY runs.created_at DESC
+            """
+        )
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -297,5 +383,93 @@ def get_run(run_id: str) -> Optional[Dict[str, Any]]:
         cur = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,))
         r = cur.fetchone()
         return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def get_latest_run_by_project(user_id: int, project_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM runs WHERE user_id=? AND project_id=? ORDER BY created_at DESC LIMIT 1",
+            (user_id, project_id),
+        )
+        r = cur.fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def delete_prompt_set(prompt_set_id: int) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM prompt_versions WHERE prompt_set_id=?", (prompt_set_id,))
+        conn.execute("DELETE FROM prompt_sets WHERE id=?", (prompt_set_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_prompt_version(prompt_set_id: int, version: int) -> None:
+    conn = get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM prompt_versions WHERE prompt_set_id=? AND version=?",
+            (prompt_set_id, version),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_users() -> List[Dict[str, Any]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT id, username, role, created_at FROM users ORDER BY created_at DESC"
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def set_user_role(user_id: int, role: str) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_run_status_counts(user_id: int) -> Dict[str, int]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM runs WHERE user_id=? GROUP BY status",
+            (user_id,),
+        )
+        res: Dict[str, int] = {}
+        for r in cur.fetchall():
+            res[str(r["status"])] = int(r["cnt"])
+        return res
+    finally:
+        conn.close()
+
+
+def get_run_daily_counts(user_id: int, start_date: str) -> List[Tuple[str, int]]:
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT substr(created_at, 1, 10) as day, COUNT(*) as cnt
+            FROM runs
+            WHERE user_id=? AND substr(created_at, 1, 10) >= ?
+            GROUP BY day
+            ORDER BY day
+            """,
+            (user_id, start_date),
+        )
+        return [(str(r["day"]), int(r["cnt"])) for r in cur.fetchall()]
     finally:
         conn.close()

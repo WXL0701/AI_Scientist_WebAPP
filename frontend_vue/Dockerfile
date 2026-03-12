@@ -1,5 +1,7 @@
 FROM node:22-alpine as build
 WORKDIR /app
+ARG VITE_APP_BUILD_ID
+ENV VITE_APP_BUILD_ID=${VITE_APP_BUILD_ID}
 COPY package*.json ./
 RUN npm install
 COPY . .

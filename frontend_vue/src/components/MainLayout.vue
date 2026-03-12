@@ -14,6 +14,10 @@
           text-color="#fff"
           active-text-color="#409EFF"
         >
+          <el-menu-item index="/dashboard">
+            <el-icon><Odometer /></el-icon>
+            <span>Dashboard</span>
+          </el-menu-item>
           <el-menu-item index="/runs">
             <el-icon><DataLine /></el-icon>
             <span>Runs</span>
@@ -21,6 +25,14 @@
           <el-menu-item index="/prompts">
             <el-icon><Document /></el-icon>
             <span>Prompts</span>
+          </el-menu-item>
+          <el-menu-item index="/templates">
+            <el-icon><Collection /></el-icon>
+            <span>Templates</span>
+          </el-menu-item>
+          <el-menu-item v-if="authStore.isAdmin" index="/users">
+            <el-icon><User /></el-icon>
+            <span>Users</span>
           </el-menu-item>
         </el-menu>
       </el-aside>
@@ -31,6 +43,8 @@
               <!-- Optional Breadcrumb -->
             </div>
             <div class="user-info">
+              <el-tag size="small" type="info" effect="plain">{{ buildIdShort }}</el-tag>
+              <el-button link type="primary" @click="openEnvDialog">Env</el-button>
               <span class="username">{{ authStore.user?.username }}</span>
               <el-button link type="danger" @click="handleLogout">Logout</el-button>
             </div>
@@ -41,24 +55,52 @@
         </el-main>
       </el-container>
     </el-container>
+    <el-dialog v-model="envDialogVisible" title="Environment Check" width="520px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="Build">{{ buildId }}</el-descriptions-item>
+        <el-descriptions-item label="Origin">{{ currentOrigin }}</el-descriptions-item>
+        <el-descriptions-item label="API Base">{{ apiBase }}</el-descriptions-item>
+        <el-descriptions-item label="Backend Health">{{ healthStatus }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="envDialogVisible = false">Close</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { Platform, DataLine, Document } from '@element-plus/icons-vue'
+import { Platform, DataLine, Document, Odometer, User, Collection } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const envDialogVisible = ref(false)
+const healthStatus = ref('checking')
+const buildId = import.meta.env.VITE_APP_BUILD_ID || 'dev'
+const buildIdShort = computed(() => `build:${String(buildId).slice(0, 12)}`)
+const currentOrigin = computed(() => window.location.origin)
+const apiBase = computed(() => `${window.location.origin}/api`)
 
 const activeMenu = computed(() => {
-  // If in run detail, keep runs active
   if (route.path.startsWith('/runs')) return '/runs'
+  if (route.path.startsWith('/templates')) return '/templates'
   return route.path
 })
+
+const openEnvDialog = async () => {
+  envDialogVisible.value = true
+  healthStatus.value = 'checking'
+  try {
+    const res = await fetch('/api/health', { method: 'GET' })
+    healthStatus.value = res.ok ? 'ok' : `http_${res.status}`
+  } catch (_error) {
+    healthStatus.value = 'unreachable'
+  }
+}
 
 const handleLogout = () => {
   authStore.logout()

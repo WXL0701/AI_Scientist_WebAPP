@@ -6,9 +6,14 @@ const routes: Array<RouteRecordRaw> = [
   {
     path: '/',
     component: MainLayout,
-    redirect: '/runs',
+    redirect: '/dashboard',
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: () => import('../views/Dashboard.vue')
+      },
       {
         path: 'runs',
         name: 'Runs',
@@ -20,6 +25,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('../views/RunDetail.vue')
       },
       {
+        path: 'runs/:id/preview',
+        name: 'MarkdownPreview',
+        component: () => import('../views/MarkdownPreview.vue')
+      },
+      {
         path: 'prompts',
         name: 'Prompts',
         component: () => import('../views/Prompts.vue')
@@ -28,6 +38,17 @@ const routes: Array<RouteRecordRaw> = [
         path: 'prompts/:id',
         name: 'PromptSetDetail',
         component: () => import('../views/PromptSetDetail.vue')
+      },
+      {
+        path: 'templates',
+        name: 'Templates',
+        component: () => import('../views/Templates.vue')
+      },
+      {
+        path: 'users',
+        name: 'Users',
+        meta: { requiresAdmin: true },
+        component: () => import('../views/Users.vue')
       }
     ]
   },
@@ -57,6 +78,8 @@ router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next('/login')
+  } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    next('/dashboard')
   } else {
     next()
   }

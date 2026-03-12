@@ -2,7 +2,7 @@ import axios from 'axios'
 import { useAuthStore } from '../stores/auth'
 
 const client = axios.create({
-  baseURL: '/', // Proxy handles the rest
+  baseURL: '/api',
   headers: {
     'Content-Type': 'application/json'
   }

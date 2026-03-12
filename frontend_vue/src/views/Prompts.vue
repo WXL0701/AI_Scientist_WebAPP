@@ -8,6 +8,7 @@
     <el-table :data="promptSets" style="width: 100%" v-loading="loading">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="Name" />
+      <el-table-column prop="creator" label="Creator" width="160" />
       <el-table-column prop="created_at" label="Created At">
         <template #default="scope">
           {{ new Date(scope.row.created_at).toLocaleString() }}
@@ -16,6 +17,7 @@
       <el-table-column label="Actions" width="200">
         <template #default="scope">
           <el-button size="small" @click="handleManageVersions(scope.row)">Manage Versions</el-button>
+          <el-button type="danger" size="small" @click="handleDeleteSet(scope.row)">Delete</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -40,13 +42,14 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 
 interface PromptSet {
   id: number
   name: string
   created_at: string
+  creator: string
 }
 
 const router = useRouter()
@@ -92,12 +95,36 @@ const handleManageVersions = (row: PromptSet) => {
   router.push(`/prompts/${row.id}`)
 }
 
+const handleDeleteSet = async (row: PromptSet) => {
+  try {
+    await ElMessageBox.confirm(
+      'Are you sure you want to delete this prompt set? This action cannot be undone.',
+      'Warning',
+      {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        type: 'warning',
+      }
+    )
+    await client.delete(`/promptsets/${row.id}`)
+    ElMessage.success('Prompt set deleted')
+    fetchPromptSets()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error('Failed to delete prompt set')
+    }
+  }
+}
+
 onMounted(() => {
   fetchPromptSets()
 })
 </script>
 
 <style scoped>
+h2 {
+  color: #303133;
+}
 .page-header {
   display: flex;
   justify-content: space-between;

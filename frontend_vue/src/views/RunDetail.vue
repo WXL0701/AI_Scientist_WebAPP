@@ -23,32 +23,23 @@
 
     <el-tabs v-model="activeTab" class="mt-4">
       <el-tab-pane label="Stages" name="stages">
-        <el-timeline>
-          <el-timeline-item
-            v-for="(task, index) in tasks"
-            :key="index"
-            :timestamp="task.timestamp"
-            :type="getStageStatusType(task.status)"
-            :hollow="task.status === 'processing'"
-          >
-            <h4>{{ task.stage }}</h4>
-            <p>{{ task.content }}</p>
-            <p v-if="task.result_path">Result: {{ task.result_path }}</p>
-          </el-timeline-item>
-        </el-timeline>
-        <el-empty v-if="tasks.length === 0" description="No stages yet" />
-      </el-tab-pane>
-
-      <el-tab-pane label="Artifacts" name="artifacts">
-        <el-table :data="artifacts" style="width: 100%">
-          <el-table-column prop="kind" label="Kind" />
-          <el-table-column prop="path" label="Path" />
-          <el-table-column label="Actions">
+        <el-table :data="tasks" style="width: 100%">
+          <el-table-column prop="stage" label="Stage" width="160" />
+          <el-table-column prop="id" label="Stage ID" width="220" />
+          <el-table-column label="Status" width="120">
             <template #default="scope">
-              <el-button size="small" @click="handleDownload(scope.row.path)">Download</el-button>
+              <el-tag :type="getStageStatusType(scope.row.status)">{{ scope.row.status || 'unknown' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="result_path" label="Result Path" />
+          <el-table-column label="Actions" width="200">
+            <template #default="scope">
+              <el-button size="small" :disabled="!scope.row.download_path" @click="handleDownload(scope.row.download_path)">Download</el-button>
+              <el-button size="small" :disabled="!isMarkdownFile(scope.row.download_path)" @click="handleView(scope.row.download_path)">View</el-button>
             </template>
           </el-table-column>
         </el-table>
+        <el-empty v-if="tasks.length === 0" description="No stages yet" />
       </el-tab-pane>
 
       <el-tab-pane label="Logs" name="logs">
@@ -62,17 +53,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
 
 const route = useRoute()
+const router = useRouter()
 const runId = route.params.id as string
 
 const loading = ref(false)
 const run = ref<any>(null)
 const tasks = ref<any[]>([])
-const artifacts = ref<any[]>([])
 const logs = ref('')
 const activeTab = ref('stages')
 
@@ -87,10 +78,6 @@ const fetchRun = async () => {
     const stagesRes = await client.get(`/runs/${runId}/stages`)
     // Backend returns { db_path: ..., tasks: [...] }
     tasks.value = stagesRes.data.tasks || []
-
-    // Fetch Artifacts
-    const artRes = await client.get(`/runs/${runId}/artifacts`)
-    artifacts.value = artRes.data
 
     // Fetch Logs (stdout)
     // Note: /download?path=logs%2Fstdout.log
@@ -124,6 +111,15 @@ const handleDownload = (path: string) => {
   // Need to add auth token? Backend /download endpoint checks Bearer token.
   // So we can't just window.open. We need to fetch blob and save.
   downloadFile(path)
+}
+
+const isMarkdownFile = (path?: string) => {
+  if (!path) return false
+  return /\.(md|markdown)$/i.test(path)
+}
+
+const handleView = (path: string) => {
+  router.push({ name: 'MarkdownPreview', params: { id: runId }, query: { path } })
 }
 
 const downloadFile = async (path: string) => {
@@ -181,6 +177,16 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+h2 {
+  color: #303133;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+}
+.mr-4 {
+  margin-right: 16px;
+}
 .page-header {
   display: flex;
   justify-content: space-between;
